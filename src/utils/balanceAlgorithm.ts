@@ -8,39 +8,43 @@ export function getPlayerRawPoints(player: LobbyPlayer): number {
   return TIER_CONFIG[player.tier]?.points ?? 4;
 }
 
-// Calculates effective combat power based on assigned role (Main 100%, Sub/Flex ~90%, Off-role ~75%)
+// Calculates effective combat power based on assigned role (Main 100%, Sub ~90%, Off-role ~82%)
+// User benchmark: Emerald 1~2 (11 points) twisted/off-role gets ~2 points deducted.
 export function getPlayerEffectivePoints(
   rawPoints: number,
   assignedLane: Lane,
   mainPos: Position,
   subPos?: Position
-): { effectivePoints: number; roleType: 'MAIN' | 'SUB' | 'FLEX' | 'OFF'; isOff: boolean } {
+): { effectivePoints: number; deduction: number; roleType: 'MAIN' | 'SUB' | 'FLEX' | 'OFF'; isOff: boolean } {
   if (mainPos === assignedLane) {
-    return { effectivePoints: rawPoints, roleType: 'MAIN', isOff: false };
+    return { effectivePoints: rawPoints, deduction: 0, roleType: 'MAIN', isOff: false };
   }
   if (mainPos === 'ALL') {
-    const effective = Math.max(1, Math.round(rawPoints * 0.95 * 10) / 10);
-    return { effectivePoints: effective, roleType: 'FLEX', isOff: false };
+    return { effectivePoints: rawPoints, deduction: 0, roleType: 'FLEX', isOff: false };
   }
-  if (subPos === assignedLane) {
-    // Sub-position: slight performance drop (about 10~15% drop, 1 tier handicap)
-    const discount = Math.max(0.5, Math.min(2.5, Math.round(rawPoints * 0.12 * 10) / 10));
-    const effective = Math.max(1, Math.round((rawPoints - discount) * 10) / 10);
-    return { effectivePoints: effective, roleType: 'SUB', isOff: false };
+  if (subPos === assignedLane || subPos === 'ALL') {
+    // Sub-position: mild point deduction (~9%, ~1 pt for 11pt Emerald)
+    const rawDeduct = Math.max(0.5, Math.round(rawPoints * 0.09 * 10) / 10);
+    const deduction = Math.round(rawDeduct * 2) / 2; // increments of 0.5
+    const effective = Math.max(0.5, Math.round((rawPoints - deduction) * 10) / 10);
+    return { effectivePoints: effective, deduction, roleType: 'SUB', isOff: false };
   }
-  if (subPos === 'ALL') {
-    const discount = Math.max(0.5, Math.min(2.0, Math.round(rawPoints * 0.1 * 10) / 10));
-    const effective = Math.max(1, Math.round((rawPoints - discount) * 10) / 10);
-    return { effectivePoints: effective, roleType: 'SUB', isOff: false };
+
+  // Off-role / Twisted lane:
+  // When subPos is 'NONE' (single-lane only, other roles impossible): deduct 5 points as requested!
+  if (subPos === 'NONE') {
+    const rawDeduct = 5.0;
+    // Ensure effective points do not drop below minimum 0.5
+    const deduction = Math.min(rawDeduct, Math.max(0.5, Math.round((rawPoints - 0.5) * 10) / 10));
+    const effective = Math.max(0.5, Math.round((rawPoints - deduction) * 10) / 10);
+    return { effectivePoints: effective, deduction, roleType: 'OFF', isOff: true };
   }
-  // Complete off-role: major performance drop (about 25% drop, 2~3 tier handicap)
-  // When subPos is 'NONE' (single-role only player), performance drops more severely (~35%)
-  const discountRate = subPos === 'NONE' ? 0.35 : 0.25;
-  const minDiscount = subPos === 'NONE' ? 1.5 : 1.0;
-  const maxDiscount = subPos === 'NONE' ? 6.0 : 5.0;
-  const discount = Math.max(minDiscount, Math.min(maxDiscount, Math.round(rawPoints * discountRate * 10) / 10));
-  const effective = Math.max(1, Math.round((rawPoints - discount) * 10) / 10);
-  return { effectivePoints: effective, roleType: 'OFF', isOff: true };
+
+  // Standard off-role: ~18% deduction (~2.0 pts for 11pt Emerald 1~2, matching user requirement)
+  const rawDeduct = Math.max(1.0, Math.round(rawPoints * 0.18 * 10) / 10);
+  const deduction = Math.round(rawDeduct * 2) / 2; // increments of 0.5 (e.g. 1.0, 1.5, 2.0, 2.5, 3.0)
+  const effective = Math.max(0.5, Math.round((rawPoints - deduction) * 10) / 10);
+  return { effectivePoints: effective, deduction, roleType: 'OFF', isOff: true };
 }
 
 // Optimal assignment of 5 players to 5 lanes maximizing position preference
@@ -80,7 +84,7 @@ function assignLanesToTeam(players: LobbyPlayer[]): {
       const lane = LANES[i];
       const player = candidate[i];
       const rawPoints = getPlayerRawPoints(player);
-      const { effectivePoints, roleType, isOff } = getPlayerEffectivePoints(
+      const { effectivePoints, deduction, roleType, isOff } = getPlayerEffectivePoints(
         rawPoints,
         lane,
         player.mainPos,
@@ -92,7 +96,7 @@ function assignLanesToTeam(players: LobbyPlayer[]): {
       if (roleType === 'MAIN') {
         penalty += 0;
       } else if (roleType === 'FLEX') {
-        penalty += 0.8;
+        penalty += 0.5;
       } else if (roleType === 'SUB') {
         penalty += 2.0;
         subRoles += 1;
@@ -108,6 +112,7 @@ function assignLanesToTeam(players: LobbyPlayer[]): {
         isOffRole: isOff,
         roleType,
         effectivePoints,
+        deduction,
       };
     }
 
@@ -236,6 +241,27 @@ export function computeBestBalancedMatch(players: LobbyPlayer[]): BalancedMatch 
         offRoleCount: totalOffRoles,
         subRoleCount: totalSubRoles,
         grade,
+      };
+    }
+  }
+
+  // 총점 낮은 팀이 항상 블루팀으로 가도록 보정 (블루 진영 어드밴티지 및 유저 요청 반영)
+  if (bestMatch) {
+    const blueEff = bestMatch.blueEffectivePoints ?? bestMatch.bluePoints;
+    const redEff = bestMatch.redEffectivePoints ?? bestMatch.redPoints;
+    const blueIsHigher =
+      blueEff > redEff ||
+      (blueEff === redEff && bestMatch.bluePoints > bestMatch.redPoints);
+
+    if (blueIsHigher) {
+      bestMatch = {
+        ...bestMatch,
+        blueTeam: bestMatch.redTeam,
+        redTeam: bestMatch.blueTeam,
+        bluePoints: bestMatch.redPoints,
+        redPoints: bestMatch.bluePoints,
+        blueEffectivePoints: bestMatch.redEffectivePoints,
+        redEffectivePoints: bestMatch.blueEffectivePoints,
       };
     }
   }

@@ -39,6 +39,7 @@ export interface TeamAssignment {
   isOffRole: boolean; // playing outside main/sub
   roleType?: 'MAIN' | 'SUB' | 'FLEX' | 'OFF';
   effectivePoints?: number;
+  deduction?: number;
 }
 
 export interface BalancedMatch {

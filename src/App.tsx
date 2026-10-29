@@ -81,13 +81,31 @@ export default function App() {
 
   const blueTotalPoints = useMemo(() => {
     if (!activeBlueRoster) return 0;
+    const total = Object.values(activeBlueRoster).reduce(
+      (sum, item) => sum + (item.effectivePoints ?? TIER_CONFIG[item.player.tier]?.points ?? 4),
+      0
+    );
+    return Math.round(total * 10) / 10;
+  }, [activeBlueRoster]);
+
+  const redTotalPoints = useMemo(() => {
+    if (!activeRedRoster) return 0;
+    const total = Object.values(activeRedRoster).reduce(
+      (sum, item) => sum + (item.effectivePoints ?? TIER_CONFIG[item.player.tier]?.points ?? 4),
+      0
+    );
+    return Math.round(total * 10) / 10;
+  }, [activeRedRoster]);
+
+  const blueRawPoints = useMemo(() => {
+    if (!activeBlueRoster) return 0;
     return Object.values(activeBlueRoster).reduce(
       (sum, item) => sum + (TIER_CONFIG[item.player.tier]?.points ?? 4),
       0
     );
   }, [activeBlueRoster]);
 
-  const redTotalPoints = useMemo(() => {
+  const redRawPoints = useMemo(() => {
     if (!activeRedRoster) return 0;
     return Object.values(activeRedRoster).reduce(
       (sum, item) => sum + (TIER_CONFIG[item.player.tier]?.points ?? 4),
@@ -95,7 +113,10 @@ export default function App() {
     );
   }, [activeRedRoster]);
 
-  const pointDiff = Math.abs(blueTotalPoints - redTotalPoints);
+  const bluePenaltyTotal = Math.max(0, Math.round((blueRawPoints - blueTotalPoints) * 10) / 10);
+  const redPenaltyTotal = Math.max(0, Math.round((redRawPoints - redTotalPoints) * 10) / 10);
+
+  const pointDiff = Math.round(Math.abs(blueTotalPoints - redTotalPoints) * 10) / 10;
 
   // Grade calculation
   const getGradeInfo = (diff: number) => {
@@ -188,6 +209,7 @@ export default function App() {
         isOffRole: eff1.isOff,
         roleType: eff1.roleType,
         effectivePoints: eff1.effectivePoints,
+        deduction: eff1.deduction,
       };
 
       newCustom[team][lane] = {
@@ -196,6 +218,7 @@ export default function App() {
         isOffRole: eff2.isOff,
         roleType: eff2.roleType,
         effectivePoints: eff2.effectivePoints,
+        deduction: eff2.deduction,
       };
 
       setCustomRoster(newCustom);
@@ -218,9 +241,16 @@ export default function App() {
         </span>
       );
     }
+    if (p.subPos === 'NONE') {
+      return (
+        <span className="text-[10px] text-rose-400 bg-rose-500/20 border border-rose-500/30 px-1 rounded font-medium">
+          불가능
+        </span>
+      );
+    }
     return (
       <span className="text-[10px] text-rose-400 bg-rose-500/10 px-1 rounded font-medium">
-        오프롤
+        라인꼬임
       </span>
     );
   };
@@ -234,9 +264,21 @@ export default function App() {
         red: { ...fresh.redTeam },
       });
       setSelectedSwapSlot(null);
-      setCopyToast('최적 밸런스로 재배분되었습니다.');
+      setCopyToast('최적 밸런스로 재배분되었습니다 (낮은 팀이 블루팀).');
       setTimeout(() => setCopyToast(null), 2000);
     }
+  };
+
+  // Swap Blue and Red team sides
+  const handleSwapSides = () => {
+    if (!activeBlueRoster || !activeRedRoster) return;
+    setCustomRoster({
+      blue: { ...activeRedRoster },
+      red: { ...activeBlueRoster },
+    });
+    setSelectedSwapSlot(null);
+    setCopyToast('블루팀과 레드팀 진영이 맞바뀌었습니다.');
+    setTimeout(() => setCopyToast(null), 2000);
   };
 
 
@@ -314,7 +356,7 @@ export default function App() {
               onClick={() => setIsImageModalOpen(true)}
               className="px-4 py-2 text-xs font-bold text-slate-950 bg-sky-400 hover:bg-sky-300 rounded-lg transition-all shadow-md shadow-sky-500/20 whitespace-nowrap cursor-pointer"
             >
-              이미지로 저장
+              결과 복사
             </button>
           </div>
         </div>
@@ -363,8 +405,20 @@ export default function App() {
                   {blueTotalPoints}
                   <span className="text-xs font-normal text-slate-400 ml-1">점</span>
                 </span>
+                {bluePenaltyTotal > 0 && (
+                  <span className="text-[10px] text-rose-400 font-mono block -mt-0.5">
+                    원점수 {blueRawPoints} (-{bluePenaltyTotal}점)
+                  </span>
+                )}
               </div>
-              <span className="text-lg font-bold text-slate-600">VS</span>
+              <button
+                onClick={handleSwapSides}
+                title="진영 맞바꾸기 (클릭 시 블루/레드 전환)"
+                className="group flex flex-col items-center justify-center px-2 py-1 rounded-lg hover:bg-slate-800/80 transition-colors cursor-pointer"
+              >
+                <span className="text-xs font-bold text-slate-400 group-hover:text-sky-300 transition-colors">⇄</span>
+                <span className="text-sm font-bold text-slate-500 group-hover:text-slate-300">VS</span>
+              </button>
               <div className="text-center">
                 <span className="text-[11px] font-bold text-rose-400 block font-sans">
                   레드팀 총점
@@ -373,6 +427,11 @@ export default function App() {
                   {redTotalPoints}
                   <span className="text-xs font-normal text-slate-400 ml-1">점</span>
                 </span>
+                {redPenaltyTotal > 0 && (
+                  <span className="text-[10px] text-rose-400 font-mono block -mt-0.5">
+                    원점수 {redRawPoints} (-{redPenaltyTotal}점)
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -407,9 +466,15 @@ export default function App() {
                 const blueSlot = activeBlueRoster?.[lane];
                 const redSlot = activeRedRoster?.[lane];
 
-                const bluePoints = blueSlot ? (TIER_CONFIG[blueSlot.player.tier]?.points ?? 4) : 0;
-                const redPoints = redSlot ? (TIER_CONFIG[redSlot.player.tier]?.points ?? 4) : 0;
-                const laneDiff = bluePoints - redPoints;
+                const blueRaw = blueSlot ? (TIER_CONFIG[blueSlot.player.tier]?.points ?? 4) : 0;
+                const bluePoints = blueSlot?.effectivePoints ?? blueRaw;
+                const blueDeduct = blueSlot?.deduction ?? Math.max(0, Math.round((blueRaw - bluePoints) * 10) / 10);
+
+                const redRaw = redSlot ? (TIER_CONFIG[redSlot.player.tier]?.points ?? 4) : 0;
+                const redPoints = redSlot?.effectivePoints ?? redRaw;
+                const redDeduct = redSlot?.deduction ?? Math.max(0, Math.round((redRaw - redPoints) * 10) / 10);
+
+                const laneDiff = Math.round((bluePoints - redPoints) * 10) / 10;
 
                 const isBlueSelected =
                   selectedSwapSlot?.team === 'blue' && selectedSwapSlot?.lane === lane;
@@ -443,7 +508,12 @@ export default function App() {
                               <span className={TIER_CONFIG[blueSlot.player.tier]?.color}>
                                 {TIER_CONFIG[blueSlot.player.tier]?.label}
                               </span>{' '}
-                              · {bluePoints}점
+                              · <span className="text-slate-200 font-semibold">{bluePoints}점</span>
+                              {blueDeduct > 0 && (
+                                <span className="text-rose-400 font-semibold ml-1">
+                                  (-{blueDeduct}점 {blueSlot.player.subPos === 'NONE' ? '불가능' : blueSlot.roleType === 'SUB' ? '부포' : '라인꼬임'})
+                                </span>
+                              )}
                             </div>
                           </div>
 
@@ -498,7 +568,12 @@ export default function App() {
                               <span className={TIER_CONFIG[redSlot.player.tier]?.color}>
                                 {TIER_CONFIG[redSlot.player.tier]?.label}
                               </span>{' '}
-                              · {redPoints}점
+                              · <span className="text-slate-200 font-semibold">{redPoints}점</span>
+                              {redDeduct > 0 && (
+                                <span className="text-rose-400 font-semibold ml-1">
+                                  (-{redDeduct}점 {redSlot.player.subPos === 'NONE' ? '불가능' : redSlot.roleType === 'SUB' ? '부포' : '라인꼬임'})
+                                </span>
+                              )}
                             </div>
                           </div>
 

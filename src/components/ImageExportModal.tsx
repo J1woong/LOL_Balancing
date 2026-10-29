@@ -156,9 +156,15 @@ export const ImageExportModal: React.FC<ImageExportModalProps> = ({
       const blueSlot = blueTeam[lane];
       const redSlot = redTeam[lane];
 
-      const bluePts = blueSlot ? (TIER_CONFIG[blueSlot.player.tier]?.points ?? 4) : 0;
-      const redPts = redSlot ? (TIER_CONFIG[redSlot.player.tier]?.points ?? 4) : 0;
-      const laneDiff = bluePts - redPts;
+      const blueRaw = blueSlot ? (TIER_CONFIG[blueSlot.player.tier]?.points ?? 4) : 0;
+      const bluePts = blueSlot?.effectivePoints ?? blueRaw;
+      const blueDeduct = blueSlot?.deduction ?? Math.max(0, Math.round((blueRaw - bluePts) * 10) / 10);
+
+      const redRaw = redSlot ? (TIER_CONFIG[redSlot.player.tier]?.points ?? 4) : 0;
+      const redPts = redSlot?.effectivePoints ?? redRaw;
+      const redDeduct = redSlot?.deduction ?? Math.max(0, Math.round((redRaw - redPts) * 10) / 10);
+
+      const laneDiff = Math.round((bluePts - redPts) * 10) / 10;
 
       // Row background
       ctx.fillStyle = idx % 2 === 0 ? '#0f172a80' : '#11182740';
@@ -207,9 +213,10 @@ export const ImageExportModal: React.FC<ImageExportModalProps> = ({
         // Role Badge if Sub or Off-role
         if (bp.mainPos !== lane && bp.mainPos !== 'ALL') {
           const isSub = bp.subPos === lane || bp.subPos === 'ALL';
+          const isNone = bp.subPos === 'NONE';
           ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif';
-          ctx.fillStyle = isSub ? '#38bdf8' : '#fb7185';
-          const badgeText = isSub ? '[부포]' : '[오프롤]';
+          ctx.fillStyle = isSub ? '#38bdf8' : isNone ? '#f43f5e' : '#fb7185';
+          const badgeText = isSub ? '[부포]' : isNone ? '[불가능]' : '[라인꼬임]';
           const nameWidth = ctx.measureText(bp.name).width;
           ctx.fillText(badgeText, 56 + nameWidth + 10, y + 34);
         }
@@ -222,7 +229,11 @@ export const ImageExportModal: React.FC<ImageExportModalProps> = ({
         ctx.fillStyle = '#94a3b8';
         ctx.font = '12px monospace';
         const tierWidth = ctx.measureText(tierInfo?.label || bp.tier).width;
-        ctx.fillText(` · ${bluePts}점`, 56 + tierWidth, y + 56);
+        let ptsText = ` · ${bluePts}점`;
+        if (blueDeduct > 0) {
+          ptsText += ` (-${blueDeduct}점)`;
+        }
+        ctx.fillText(ptsText, 56 + tierWidth, y + 56);
       }
 
       // Red Player (Right)
@@ -240,19 +251,24 @@ export const ImageExportModal: React.FC<ImageExportModalProps> = ({
         // Role Badge if Sub or Off-role
         if (rp.mainPos !== lane && rp.mainPos !== 'ALL') {
           const isSub = rp.subPos === lane || rp.subPos === 'ALL';
+          const isNone = rp.subPos === 'NONE';
           ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif';
-          ctx.fillStyle = isSub ? '#38bdf8' : '#fb7185';
-          const badgeText = isSub ? '[부포]' : '[오프롤]';
+          ctx.fillStyle = isSub ? '#38bdf8' : isNone ? '#f43f5e' : '#fb7185';
+          const badgeText = isSub ? '[부포]' : isNone ? '[불가능]' : '[라인꼬임]';
           const nameWidth = ctx.measureText(rp.name).width;
           ctx.fillText(badgeText, width - 56 - nameWidth - 10, y + 34);
         }
 
         // Tier and Points
+        let ptsText = ` · ${redPts}점`;
+        if (redDeduct > 0) {
+          ptsText += ` (-${redDeduct}점)`;
+        }
         ctx.fillStyle = '#94a3b8';
         ctx.font = '12px monospace';
-        ctx.fillText(` · ${redPts}점`, width - 56, y + 56);
+        ctx.fillText(ptsText, width - 56, y + 56);
 
-        const ptsWidth = ctx.measureText(` · ${redPts}점`).width;
+        const ptsWidth = ctx.measureText(ptsText).width;
         ctx.fillStyle = TIER_CANVAS_COLORS[rp.tier] || '#ffffff';
         ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif';
         ctx.fillText(tierInfo?.label || rp.tier, width - 56 - ptsWidth, y + 56);
